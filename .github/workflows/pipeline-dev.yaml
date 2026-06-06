@@ -154,15 +154,14 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name demo-eks --region ap-south-1
 
-      - name: Apply secret and configmap
+      - name: Bootstrap ESO resources
+        run: |
+          kubectl apply -f external-secrets/service-accounts.yaml
+          kubectl apply -f external-secrets/secret-store-dev.yaml
+
+      - name: Apply configmap
         run: |
           kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create secret generic rds-secret -n dev \
-            --from-literal=DB_HOST=${{ secrets.DEV_DB_HOST }} \
-            --from-literal=DB_NAME=${{ secrets.DEV_DB_NAME }} \
-            --from-literal=DB_USER=${{ secrets.DEV_DB_USER }} \
-            --from-literal=DB_PASSWORD=${{ secrets.DEV_DB_PASSWORD }} \
-            --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f migrations/dev/configmap.yaml
 
       - name: Run migration

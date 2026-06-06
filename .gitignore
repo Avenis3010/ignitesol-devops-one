@@ -3,6 +3,8 @@
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+*.auto.tfvars
+ovride.tf
 
 # Kubernetes
 *.kubeconfig
