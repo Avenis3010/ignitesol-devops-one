@@ -1,0 +1,30 @@
+# AppProject scopes ArgoCD so prod apps can ONLY deploy to the prod namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: prod
+  namespace: argocd
+spec:
+  description: Prod environment — isolated from dev
+
+  sourceRepos:
+    - https://github.com/Avenis3010/ignite-solutions.git
+
+  destinations:
+    - namespace: prod
+      server: https://kubernetes.default.svc
+
+  roles:
+    - name: prod-deployer
+      description: Prod CI/CD deploy access
+      policies:
+        - p, proj:prod:prod-deployer, applications, sync, prod/*, allow
+        - p, proj:prod:prod-deployer, applications, get,  prod/*, allow
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

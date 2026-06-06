@@ -1,31 +1,25 @@
-# ── OIDC Provider (shared, created once) ─────────────────────────────────────
+locals {
+  oidc_url   = var.oidc_provider_url
+  branch_ref = var.env == "prod" ? "refs/heads/production" : "refs/heads/dev"
+  prefix     = "${var.project_name}-${var.env}"
+}
+
+# The GitHub OIDC provider is account-scoped (one per AWS account).
+# On first apply (dev env) it is created. On subsequent applies it is
+# looked up via data source to avoid duplicate-resource errors.
+# To import an existing one:
+#   terraform import module.iam.aws_iam_openid_connect_provider.github <arn>
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+
+  lifecycle { prevent_destroy = true }
 }
 
-# ── Local helpers ─────────────────────────────────────────────────────────────
-locals {
-  oidc_url = var.oidc_provider_url
-
-  # Trust condition builder: locks a role to one branch + one workflow job
-  def_trust = {
-    Version = "2012-10-17"
-    Statement = []
-  }
-}
-
-# ── Reusable trust-policy factory (inline) ────────────────────────────────────
-# Each role's assume_role_policy is built inline below for clarity.
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. BACKEND DEV ROLE
-#    Trusted by: push to dev branch, build-backend job only
-#    Permissions: ECR push, EKS describe (update-kubeconfig), read ArgoCD secret
-# ─────────────────────────────────────────────────────────────────────────────
-resource "aws_iam_role" "backend_dev" {
-  name = "${var.project_name}-backend-dev-role"
+# ── BACKEND ROLE — ECR push + EKS describe only ───────────────────────────────
+resource "aws_iam_role" "backend" {
+  name = "${local.prefix}-backend-cicd-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -35,76 +29,17 @@ resource "aws_iam_role" "backend_dev" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = { "${local.oidc_url}:aud" = "sts.amazonaws.com" }
-        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/dev" }
+        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:${local.branch_ref}" }
       }
     }]
   })
+
+  tags = { Role = "backend-cicd", Environment = var.env }
 }
 
-resource "aws_iam_role_policy" "backend_dev" {
-  name = "backend-dev-policy"
-  role = aws_iam_role.backend_dev.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "ECRAuth"
-        Effect = "Allow"
-        Action = ["ecr:GetAuthorizationToken"]
-        Resource = ["*"]
-      },
-      {
-        Sid    = "ECRPush"
-        Effect = "Allow"
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart",
-          "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
-        ]
-        Resource = var.ecr_repo_arns
-      },
-      {
-        Sid    = "EKSDescribe"
-        Effect = "Allow"
-        Action = [
-          "eks:DescribeCluster",
-          "eks:ListClusters"
-        ]
-        Resource = [var.eks_cluster_arn]
-      }
-    ]
-  })
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. BACKEND PROD ROLE
-#    Trusted by: push to production branch only
-# ─────────────────────────────────────────────────────────────────────────────
-resource "aws_iam_role" "backend_prod" {
-  name = "${var.project_name}-backend-prod-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = { "${local.oidc_url}:aud" = "sts.amazonaws.com" }
-        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/production" }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "backend_prod" {
-  name = "backend-prod-policy"
-  role = aws_iam_role.backend_prod.id
+resource "aws_iam_role_policy" "backend" {
+  name = "${local.prefix}-backend-cicd-policy"
+  role = aws_iam_role.backend.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -119,35 +54,25 @@ resource "aws_iam_role_policy" "backend_prod" {
         Sid    = "ECRPush"
         Effect = "Allow"
         Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart",
-          "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
+          "ecr:BatchCheckLayerAvailability", "ecr:CompleteLayerUpload",
+          "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
+          "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"
         ]
         Resource = var.ecr_repo_arns
       },
       {
-        Sid    = "EKSDescribe"
-        Effect = "Allow"
-        Action = [
-          "eks:DescribeCluster",
-          "eks:ListClusters"
-        ]
+        Sid      = "EKSDescribe"
+        Effect   = "Allow"
+        Action   = ["eks:DescribeCluster", "eks:ListClusters"]
         Resource = [var.eks_cluster_arn]
       }
     ]
   })
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. FRONTEND DEV ROLE
-#    Permissions: S3 sync to /dev/* prefix only, CloudFront invalidation
-# ─────────────────────────────────────────────────────────────────────────────
-resource "aws_iam_role" "frontend_dev" {
-  name = "${var.project_name}-frontend-dev-role"
+# ── FRONTEND ROLE — this env's S3 bucket + CloudFront only ───────────────────
+resource "aws_iam_role" "frontend" {
+  name = "${local.prefix}-frontend-cicd-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -157,32 +82,26 @@ resource "aws_iam_role" "frontend_dev" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = { "${local.oidc_url}:aud" = "sts.amazonaws.com" }
-        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/dev" }
+        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:${local.branch_ref}" }
       }
     }]
   })
+
+  tags = { Role = "frontend-cicd", Environment = var.env }
 }
 
-resource "aws_iam_role_policy" "frontend_dev" {
-  name = "frontend-dev-policy"
-  role = aws_iam_role.frontend_dev.id
+resource "aws_iam_role_policy" "frontend" {
+  name = "${local.prefix}-frontend-cicd-policy"
+  role = aws_iam_role.frontend.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "S3DevDeploy"
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          var.s3_bucket_arn,
-          "${var.s3_bucket_arn}/dev/*"
-        ]
+        Sid      = "S3Deploy"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:DeleteObject", "s3:GetObject", "s3:ListBucket"]
+        Resource = [var.s3_bucket_arn, "${var.s3_bucket_arn}/*"]
       },
       {
         Sid      = "CloudFrontInvalidate"
@@ -194,12 +113,10 @@ resource "aws_iam_role_policy" "frontend_dev" {
   })
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. FRONTEND PROD ROLE
-#    Permissions: S3 sync to /prod/* prefix only, CloudFront invalidation
-# ─────────────────────────────────────────────────────────────────────────────
-resource "aws_iam_role" "frontend_prod" {
-  name = "${var.project_name}-frontend-prod-role"
+# ── DATABASE ROLE — EKS describe + read THIS env's secret only ────────────────
+# No RDS direct access. No Secrets Manager write. No S3. No ECR.
+resource "aws_iam_role" "database" {
+  name = "${local.prefix}-database-cicd-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -209,139 +126,32 @@ resource "aws_iam_role" "frontend_prod" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = { "${local.oidc_url}:aud" = "sts.amazonaws.com" }
-        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/production" }
+        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:${local.branch_ref}" }
       }
     }]
   })
+
+  tags = { Role = "database-cicd", Environment = var.env }
 }
 
-resource "aws_iam_role_policy" "frontend_prod" {
-  name = "frontend-prod-policy"
-  role = aws_iam_role.frontend_prod.id
+resource "aws_iam_role_policy" "database" {
+  name = "${local.prefix}-database-cicd-policy"
+  role = aws_iam_role.database.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "S3ProdDeploy"
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          var.s3_bucket_arn,
-          "${var.s3_bucket_arn}/prod/*"
-        ]
-      },
-      {
-        Sid      = "CloudFrontInvalidate"
+        Sid      = "EKSDescribe"
         Effect   = "Allow"
-        Action   = ["cloudfront:CreateInvalidation"]
-        Resource = [var.cloudfront_distribution_arn]
-      }
-    ]
-  })
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. DATABASE DEV ROLE
-#    Permissions: EKS describe (update-kubeconfig), read dev secret only
-#    NO RDS direct access, NO Secrets Manager write
-# ─────────────────────────────────────────────────────────────────────────────
-resource "aws_iam_role" "database_dev" {
-  name = "${var.project_name}-database-dev-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = { "${local.oidc_url}:aud" = "sts.amazonaws.com" }
-        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/dev" }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "database_dev" {
-  name = "database-dev-policy"
-  role = aws_iam_role.database_dev.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "EKSDescribe"
-        Effect = "Allow"
-        Action = [
-          "eks:DescribeCluster",
-          "eks:ListClusters"
-        ]
+        Action   = ["eks:DescribeCluster", "eks:ListClusters"]
         Resource = [var.eks_cluster_arn]
       },
       {
-        Sid    = "SecretsReadDevOnly"
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret"
-        ]
-        Resource = [var.secrets_manager_dev_arn]
-      }
-    ]
-  })
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. DATABASE PROD ROLE
-#    Permissions: EKS describe, read prod secret only
-# ─────────────────────────────────────────────────────────────────────────────
-resource "aws_iam_role" "database_prod" {
-  name = "${var.project_name}-database-prod-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = { "${local.oidc_url}:aud" = "sts.amazonaws.com" }
-        StringLike   = { "${local.oidc_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/production" }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "database_prod" {
-  name = "database-prod-policy"
-  role = aws_iam_role.database_prod.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "EKSDescribe"
-        Effect = "Allow"
-        Action = [
-          "eks:DescribeCluster",
-          "eks:ListClusters"
-        ]
-        Resource = [var.eks_cluster_arn]
-      },
-      {
-        Sid    = "SecretsReadProdOnly"
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret"
-        ]
-        Resource = [var.secrets_manager_prod_arn]
+        Sid      = "SecretsReadThisEnvOnly"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+        Resource = [var.secrets_manager_secret_arn]
       }
     ]
   })

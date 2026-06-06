@@ -1,76 +1,98 @@
+locals {
+  env          = "dev"
+  project_name = var.project_name
+
+  tags = {
+    Environment = "dev"
+    Project     = var.project_name
+    ManagedBy   = "terraform"
+    Owner       = "platform-team"
+  }
+}
+
+data "aws_caller_identity" "current" {}
+
 module "vpc" {
   source       = "../../modules/vpc"
+  env          = local.env
+  project_name = local.project_name
   vpc_cidr     = var.vpc_cidr
   aws_region   = var.aws_region
-  project_name = var.project_name
+  tags         = local.tags
 }
 
 module "eks" {
   source          = "../../modules/eks"
+  env             = local.env
+  project_name    = local.project_name
   vpc_id          = module.vpc.vpc_id
   private_subnets = module.vpc.private_subnets
   public_subnets  = module.vpc.public_subnets
+  tags            = local.tags
 }
 
 module "ecr" {
-  source = "../../modules/ecr"
+  source       = "../../modules/ecr"
+  env          = local.env
+  project_name = local.project_name
+  tags         = local.tags
 }
 
 module "rds" {
   source              = "../../modules/rds"
+  env                 = local.env
+  project_name        = local.project_name
   subnet_ids          = module.vpc.private_subnets
   db_password         = var.db_password
   vpc_id              = module.vpc.vpc_id
   allowed_cidr_blocks = [var.vpc_cidr]
+  tags                = local.tags
 }
 
-module "secrets_dev" {
+module "secrets" {
   source      = "../../modules/secrets"
-  env         = "dev"
-  db_host     = module.rds.db_endpoint
-  db_password = var.db_password
-}
-
-module "secrets_prod" {
-  source      = "../../modules/secrets"
-  env         = "prod"
+  env         = local.env
   db_host     = module.rds.db_endpoint
   db_password = var.db_password
 }
 
 module "eso_irsa" {
   source            = "../../modules/eso_irsa"
-  project_name      = var.project_name
+  project_name      = local.project_name
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_provider_url = module.eks.oidc_provider_url
-  secret_arns       = [module.secrets_dev.secret_arn, module.secrets_prod.secret_arn]
-  namespaces        = ["dev", "prod"]
+  secret_arns       = [module.secrets.secret_arn]
+  namespaces        = [local.env]
 }
 
 module "s3" {
-  source = "../../modules/s3"
+  source       = "../../modules/s3"
+  env          = local.env
+  project_name = local.project_name
+  tags         = local.tags
 }
 
 module "cloudfront" {
   source           = "../../modules/cloudfront"
+  env              = local.env
+  project_name     = local.project_name
   s3_bucket_domain = module.s3.bucket_domain_name
   origin_domain    = var.origin_domain
+  tags             = local.tags
 }
 
 module "iam" {
   source       = "../../modules/iam"
-  project_name = var.project_name
+  project_name = local.project_name
   github_repo  = var.github_repo
 
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_provider_url = module.eks.oidc_provider_url
 
+  env                         = local.env
   ecr_repo_arns               = [module.ecr.backend_repo_arn, module.ecr.frontend_repo_arn]
   s3_bucket_arn               = module.s3.bucket_arn
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
-  eks_cluster_arn             = "arn:aws:eks:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/demo-eks"
-  secrets_manager_dev_arn     = module.secrets_dev.secret_arn
-  secrets_manager_prod_arn    = module.secrets_prod.secret_arn
+  eks_cluster_arn             = module.eks.cluster_arn
+  secrets_manager_secret_arn  = module.secrets.secret_arn
 }
-
-data "aws_caller_identity" "current" {}

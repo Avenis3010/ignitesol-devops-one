@@ -3,8 +3,11 @@ kind: Application
 metadata:
   name: backend-api-prod
   namespace: argocd
+  labels:
+    environment: prod
+    project: central-platform
 spec:
-  project: default
+  project: prod
   source:
     repoURL: https://github.com/Avenis3010/ignite-solutions.git
     targetRevision: production
@@ -20,4 +23,4 @@ spec:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
+      - CreateNamespace=false   # namespace is pre-created by k8s/prod/namespace.yaml

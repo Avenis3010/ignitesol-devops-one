@@ -9,6 +9,10 @@ permissions:
   id-token: write
   contents: write
 
+env:
+  AWS_REGION:  ap-south-1
+  EKS_CLUSTER: central-platform-prod-eks    # prod-only cluster
+
 jobs:
 
   # ─── DETECT CHANGES ─────────────────────────────────────────────────────────
@@ -16,7 +20,7 @@ jobs:
     name: Detect Changed Paths
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      backend:  ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       database: ${{ steps.filter.outputs.database }}
     steps:
@@ -38,8 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.backend == 'true'
-    # Requires approval from a reviewer before running — set up at:
-    # GitHub → Settings → Environments → prod-backend → Protection rules
+    # Manual approval gate — configure at:
+    # GitHub → Settings → Environments → prod-backend → Required reviewers
     environment: prod-backend
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +52,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.BACKEND_PROD_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -56,14 +60,14 @@ jobs:
 
       - name: Build & push backend image
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: backend-api-dev
-          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_BACKEND_REPO_PROD }}
+          IMAGE_TAG:      ${{ github.sha }}
         run: |
           cd backend-services/users-api
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-                      $ECR_REGISTRY/$ECR_REPOSITORY:prod-latest
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                     $ECR_REGISTRY/$ECR_REPOSITORY:prod-latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:prod-latest
 
@@ -77,11 +81,18 @@ jobs:
           git commit -m "chore: update prod image tag to ${{ github.sha }}" || echo "No changes"
           git push
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name demo-eks --region ap-south-1
+      - name: Update kubeconfig (prod cluster)
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
 
-      - name: Apply ArgoCD prod app
-        run: kubectl apply -f argocd/backend-prod.yaml
+      - name: Apply namespace + network policy
+        run: |
+          kubectl apply -f k8s/prod/namespace.yaml
+          kubectl apply -f k8s/prod/network-policy.yaml
+
+      - name: Apply ArgoCD project + app
+        run: |
+          kubectl apply -f argocd/project-prod.yaml
+          kubectl apply -f argocd/backend-prod.yaml
 
       - name: Install ArgoCD CLI
         run: |
@@ -127,18 +138,18 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.FRONTEND_PROD_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to S3 /prod path
+      - name: Deploy to S3 (prod bucket)
         run: |
           aws s3 sync frontend-services/frontend-apps/web-ui/build/ \
-            s3://${{ vars.S3_BUCKET_NAME }}/prod/ --delete
+            s3://${{ vars.S3_BUCKET_NAME_PROD }}/ --delete
 
-      - name: Invalidate CloudFront /prod/*
+      - name: Invalidate CloudFront (prod distribution)
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/prod/*"
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID_PROD }} \
+            --paths "/*"
 
   # ─── DATABASE ───────────────────────────────────────────────────────────────
   database-migration:
@@ -154,23 +165,21 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.DATABASE_PROD_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name demo-eks --region ap-south-1
+      - name: Update kubeconfig (prod cluster)
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
 
-      - name: Bootstrap ESO resources
+      - name: Bootstrap namespace + ESO
         run: |
+          kubectl apply -f k8s/prod/namespace.yaml
+          kubectl apply -f k8s/prod/network-policy.yaml
           kubectl apply -f external-secrets/service-accounts.yaml
           kubectl apply -f external-secrets/secret-store-prod.yaml
 
-      - name: Apply configmap
+      - name: Apply configmap & run migration
         run: |
-          kubectl create namespace prod --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f migrations/prod/configmap.yaml
-
-      - name: Run migration
-        run: |
           kubectl delete job mysql-migration -n prod --ignore-not-found=true
           kubectl apply -f migrations/prod/migration-job.yaml
           kubectl wait --for=condition=complete job/mysql-migration -n prod --timeout=300s

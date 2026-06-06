@@ -1,5 +1,5 @@
 resource "aws_security_group" "rds" {
-  name   = "rds-sg"
+  name   = "${var.project_name}-${var.env}-rds-sg"
   vpc_id = var.vpc_id
 
   ingress {
@@ -15,19 +15,21 @@ resource "aws_security_group" "rds" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = var.tags
 }
 
 resource "aws_db_subnet_group" "this" {
-  name       = "db-subnet-group"
+  name       = "${var.project_name}-${var.env}-db-subnet-group"
   subnet_ids = var.subnet_ids
+  tags       = var.tags
 }
 
 resource "aws_db_instance" "mysql" {
-  identifier = "platform-mysql-new"
+  identifier = "${var.project_name}-${var.env}-mysql"
 
   engine         = "mysql"
   engine_version = "8.0"
-
   instance_class = "db.t3.micro"
 
   allocated_storage = 20
@@ -40,4 +42,6 @@ resource "aws_db_instance" "mysql" {
 
   skip_final_snapshot = true
   publicly_accessible = false
+
+  tags = var.tags
 }

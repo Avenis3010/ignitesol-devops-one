@@ -1,0 +1,10 @@
+output "cluster_name"              { value = module.eks.cluster_name }
+output "ecr_backend_url"           { value = module.ecr.backend_repo_url }
+output "rds_endpoint"              { value = module.rds.rds_endpoint }
+output "s3_bucket_name"            { value = module.s3.bucket_name }
+output "cloudfront_domain"         { value = module.cloudfront.cloudfront_domain }
+output "cloudfront_distribution_id" { value = module.cloudfront.distribution_id }
+output "backend_dev_role_arn"      { value = module.iam.backend_role_arn }
+output "frontend_dev_role_arn"     { value = module.iam.frontend_role_arn }
+output "database_dev_role_arn"     { value = module.iam.database_role_arn }
+output "eso_irsa_role_arn"         { value = module.eso_irsa.role_arn }
