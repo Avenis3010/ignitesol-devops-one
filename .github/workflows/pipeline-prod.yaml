@@ -13,6 +13,7 @@ concurrency:
 permissions:
   id-token: write
   contents: write
+  security-events: write   # upload Trivy SARIF to GitHub Security tab
 
 env:
   AWS_REGION:  ap-south-1
@@ -63,7 +64,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build & push backend image
+      - name: Build backend image (local — before scan)
         env:
           ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ vars.ECR_BACKEND_REPO_PROD }}
@@ -71,6 +72,29 @@ jobs:
         run: |
           cd backend-services/users-api
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+
+      # ── Trivy image scan — CRITICAL + HIGH blocks prod deploy ────────────────
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_BACKEND_REPO_PROD }}:${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH  # stricter than dev — HIGH also blocks prod
+          exit-code: "1"
+
+      - name: Upload Trivy image results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+
+      - name: Push backend image to ECR
+        env:
+          ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_BACKEND_REPO_PROD }}
+          IMAGE_TAG:      ${{ github.sha }}
+        run: |
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
                      $ECR_REGISTRY/$ECR_REPOSITORY:prod-latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG

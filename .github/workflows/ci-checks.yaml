@@ -1,8 +1,7 @@
 name: CI Checks
 
 # Runs on every PR targeting dev or production.
-# Both branch protection rules require ALL jobs in this workflow to pass
-# before the PR can be merged — which is what triggers the deploy pipeline.
+# ALL jobs must pass before the PR can be merged.
 on:
   pull_request:
     branches:
@@ -12,50 +11,103 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  security-events: write   # needed to upload SARIF results to GitHub Security tab
 
 jobs:
 
-  # ─── LINT — backend ─────────────────────────────────────────────────────────
+  # ─── LINT — backend ──────────────────────────────────────────────────────────
   lint-backend:
     name: Lint Backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install & lint
         run: |
           pip install -r backend-services/users-api/requirements.txt
           pip install flake8
+          flake8 backend-services/users-api/app.py --max-line-length=120
 
-      - name: Run flake8
-        run: flake8 backend-services/users-api/app.py --max-line-length=120
-
-  # ─── LINT — frontend ────────────────────────────────────────────────────────
+  # ─── LINT — frontend ─────────────────────────────────────────────────────────
   lint-frontend:
     name: Lint Frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: npm
           cache-dependency-path: frontend-services/frontend-apps/web-ui/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci --prefix frontend-services/frontend-apps/web-ui
+      - name: Install & lint
+        run: |
+          npm ci --prefix frontend-services/frontend-apps/web-ui
+          npm run lint --prefix frontend-services/frontend-apps/web-ui
 
-      - name: Run lint
-        run: npm run lint --prefix frontend-services/frontend-apps/web-ui
+  # ─── SONARQUBE — code quality gate ───────────────────────────────────────────
+  # Scans for: bugs, vulnerabilities, code smells, duplications, coverage.
+  # Pipeline FAILS if the SonarQube Quality Gate is not "Passed".
+  # Required GitHub secret: SONAR_TOKEN, SONAR_HOST_URL
+  sonarqube:
+    name: SonarQube Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history needed for blame data
 
-  # ─── DOCKER BUILD DRY-RUN — no push ─────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies + coverage
+        run: |
+          pip install -r backend-services/users-api/requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          cd backend-services/users-api
+          pytest --cov=. --cov-report=xml:coverage.xml || true
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  # ─── TRIVY — filesystem scan (secrets + vuln in source) ──────────────────────
+  # Scans source code and dependencies for secrets and known CVEs.
+  # Runs on PR so developers see issues before they are merged.
+  trivy-fs:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: backend-services/users-api
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"          # fail PR if CRITICAL or HIGH found in source
+
+      - name: Upload Trivy FS results to GitHub Security tab
+        if: always()              # upload even on failure so findings are visible
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+
+  # ─── DOCKER BUILD DRY-RUN — no push ──────────────────────────────────────────
   build-image-check:
     name: Docker Build Check
     runs-on: ubuntu-latest
@@ -68,38 +120,29 @@ jobs:
             --tag backend-api:pr-${{ github.event.pull_request.number }} \
             backend-services/users-api/
 
-  # ─── HELM TEMPLATE LINT ──────────────────────────────────────────────────────
+  # ─── HELM LINT ────────────────────────────────────────────────────────────────
   helm-lint:
     name: Helm Chart Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v4
         with:
           version: "v3.15.0"
 
-      - name: Lint dev chart
+      - name: Lint + template dry-run (dev)
         run: |
           helm lint backend-services/users-api/backend-api \
             -f backend-services/users-api/backend-api/values-dev.yaml
+          helm template backend-api-dev \
+            backend-services/users-api/backend-api \
+            -f backend-services/users-api/backend-api/values-dev.yaml > /dev/null
 
-      - name: Lint prod chart
+      - name: Lint + template dry-run (prod)
         run: |
           helm lint backend-services/users-api/backend-api \
             -f backend-services/users-api/backend-api/values-prod.yaml
-
-      - name: Helm template dry-run (dev)
-        run: |
-          helm template backend-api-dev \
-            backend-services/users-api/backend-api \
-            -f backend-services/users-api/backend-api/values-dev.yaml \
-            --debug > /dev/null
-
-      - name: Helm template dry-run (prod)
-        run: |
           helm template backend-api-prod \
             backend-services/users-api/backend-api \
-            -f backend-services/users-api/backend-api/values-prod.yaml \
-            --debug > /dev/null
+            -f backend-services/users-api/backend-api/values-prod.yaml > /dev/null
