@@ -5,6 +5,11 @@ on:
     branches:
       - dev
 
+# Only one deploy runs at a time on dev. A new push cancels an in-progress run.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
 permissions:
   id-token: write
   contents: write

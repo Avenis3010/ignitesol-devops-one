@@ -1,0 +1,105 @@
+name: CI Checks
+
+# Runs on every PR targeting dev or production.
+# Both branch protection rules require ALL jobs in this workflow to pass
+# before the PR can be merged — which is what triggers the deploy pipeline.
+on:
+  pull_request:
+    branches:
+      - dev
+      - production
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+
+  # ─── LINT — backend ─────────────────────────────────────────────────────────
+  lint-backend:
+    name: Lint Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend-services/users-api/requirements.txt
+          pip install flake8
+
+      - name: Run flake8
+        run: flake8 backend-services/users-api/app.py --max-line-length=120
+
+  # ─── LINT — frontend ────────────────────────────────────────────────────────
+  lint-frontend:
+    name: Lint Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: frontend-services/frontend-apps/web-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix frontend-services/frontend-apps/web-ui
+
+      - name: Run lint
+        run: npm run lint --prefix frontend-services/frontend-apps/web-ui
+
+  # ─── DOCKER BUILD DRY-RUN — no push ─────────────────────────────────────────
+  build-image-check:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image (no push)
+        run: |
+          docker build \
+            --tag backend-api:pr-${{ github.event.pull_request.number }} \
+            backend-services/users-api/
+
+  # ─── HELM TEMPLATE LINT ──────────────────────────────────────────────────────
+  helm-lint:
+    name: Helm Chart Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.0"
+
+      - name: Lint dev chart
+        run: |
+          helm lint backend-services/users-api/backend-api \
+            -f backend-services/users-api/backend-api/values-dev.yaml
+
+      - name: Lint prod chart
+        run: |
+          helm lint backend-services/users-api/backend-api \
+            -f backend-services/users-api/backend-api/values-prod.yaml
+
+      - name: Helm template dry-run (dev)
+        run: |
+          helm template backend-api-dev \
+            backend-services/users-api/backend-api \
+            -f backend-services/users-api/backend-api/values-dev.yaml \
+            --debug > /dev/null
+
+      - name: Helm template dry-run (prod)
+        run: |
+          helm template backend-api-prod \
+            backend-services/users-api/backend-api \
+            -f backend-services/users-api/backend-api/values-prod.yaml \
+            --debug > /dev/null

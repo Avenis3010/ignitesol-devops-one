@@ -6,6 +6,10 @@ metadata:
   labels:
     environment: prod
     project: central-platform
+  annotations:
+    # Prod deployments require a PR merged to production branch,
+    # passing all required status checks, and a manual approval in GitHub.
+    deploy/policy: "pr-review-required"
 spec:
   project: prod
   source:
@@ -19,8 +23,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: prod
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # automated sync is OFF for prod — pipeline triggers sync explicitly
+    # after GitHub environment approval gate passes
     syncOptions:
-      - CreateNamespace=false   # namespace is pre-created by k8s/prod/namespace.yaml
+      - CreateNamespace=false
+      - PrunePropagationPolicy=foreground
+      - ApplyOutOfSyncOnly=true

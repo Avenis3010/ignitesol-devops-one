@@ -5,6 +5,11 @@ on:
     branches:
       - production
 
+# Prod deploys never cancel in-progress — a running prod deploy must finish.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: write
