@@ -54,12 +54,23 @@ readinessProbe:
   periodSeconds: 5
 
 autoscaling:
-  enabled: false
+  enabled: true
   minReplicas: 2
   maxReplicas: 5
-  targetCPUUtilizationPercentage: 80
+  targetCPUUtilizationPercentage: 70   # scale earlier than dev to absorb traffic spikes
 
-resources: {}
+# ── Resource limits ───────────────────────────────────────────────────────────
+# Prod gets more headroom than dev to handle real traffic.
+# requests: guaranteed allocation — used for scheduling and HPA calculations
+# limits:   hard cap — prevents a single pod starving the node
+resources:
+  requests:
+    cpu:    "200m"    # 0.2 vCPU guaranteed per replica
+    memory: "256Mi"
+  limits:
+    cpu:    "500m"    # burst up to 0.5 vCPU
+    memory: "512Mi"   # hard cap — OOMKill before it impacts other pods
+
 podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}

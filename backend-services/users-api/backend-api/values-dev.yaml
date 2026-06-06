@@ -62,7 +62,17 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
 
-resources: {}
+# ── Resource limits ───────────────────────────────────────────────────────────
+# requests: guaranteed allocation — used for scheduling decisions
+# limits:   hard cap — container is OOMKilled if memory limit is exceeded
+resources:
+  requests:
+    cpu:    "100m"    # 0.1 vCPU guaranteed
+    memory: "128Mi"
+  limits:
+    cpu:    "300m"    # burst up to 0.3 vCPU
+    memory: "256Mi"   # hard cap — prevents noisy-neighbour memory exhaustion
+
 podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
