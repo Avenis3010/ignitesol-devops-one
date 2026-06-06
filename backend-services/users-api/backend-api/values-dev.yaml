@@ -3,7 +3,19 @@ replicaCount: 1
 image:
   repository: 758024567313.dkr.ecr.ap-south-1.amazonaws.com/backend-api-dev
   pullPolicy: IfNotPresent
+  # tag is overwritten by CI/CD pipeline on every deploy — never set to "latest"
   tag: 078b225d7ef4d9794c3a1770e1556de0e1451ff3
+
+# ── Audit metadata ────────────────────────────────────────────────────────────
+# These defaults are placeholders. CI/CD overwrites every field via --set at
+# deploy time so that "kubectl describe deployment/backend-api-dev" shows the
+# exact version, who deployed it, when, and from which branch.
+audit:
+  environment: dev
+  gitSha:      "unknown"   # overwritten: --set audit.gitSha=$GITHUB_SHA
+  gitRef:      "unknown"   # overwritten: --set audit.gitRef=$GITHUB_REF_NAME
+  deployedBy:  "unknown"   # overwritten: --set audit.deployedBy=$GITHUB_ACTOR
+  deployTime:  "unknown"   # overwritten: --set audit.deployTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 serviceAccount:
   create: true

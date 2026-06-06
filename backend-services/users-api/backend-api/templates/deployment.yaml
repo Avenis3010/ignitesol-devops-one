@@ -4,6 +4,18 @@ metadata:
   name: {{ include "backend-api.fullname" . }}
   labels:
     {{- include "backend-api.labels" . | nindent 4 }}
+    # ── Audit labels — visible in: kubectl describe deployment/<name> ──────────
+    app.kubernetes.io/version:     {{ .Values.image.tag | quote }}
+    app.kubernetes.io/environment: {{ .Values.audit.environment | quote }}
+    app.kubernetes.io/managed-by:  "argocd"
+  annotations:
+    # Static deploy context — written once at deploy time by CI/CD
+    deploy/git-sha:      {{ .Values.audit.gitSha | quote }}
+    deploy/git-ref:      {{ .Values.audit.gitRef | quote }}
+    deploy/deployed-by:  {{ .Values.audit.deployedBy | quote }}
+    deploy/deploy-time:  {{ .Values.audit.deployTime | quote }}
+    deploy/image-tag:    {{ .Values.image.tag | quote }}
+    deploy/environment:  {{ .Values.audit.environment | quote }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
@@ -13,13 +25,22 @@ spec:
       {{- include "backend-api.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       labels:
         {{- include "backend-api.labels" . | nindent 8 }}
+        app.kubernetes.io/version:     {{ .Values.image.tag | quote }}
+        app.kubernetes.io/environment: {{ .Values.audit.environment | quote }}
         {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Pod annotations — same values so they show on: kubectl describe pod/<name>
+        deploy/git-sha:     {{ .Values.audit.gitSha | quote }}
+        deploy/git-ref:     {{ .Values.audit.gitRef | quote }}
+        deploy/deployed-by: {{ .Values.audit.deployedBy | quote }}
+        deploy/deploy-time: {{ .Values.audit.deployTime | quote }}
+        deploy/image-tag:   {{ .Values.image.tag | quote }}
+        deploy/environment: {{ .Values.audit.environment | quote }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
@@ -38,7 +59,8 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          # Never use :latest — tag is always the exact git SHA set by CI/CD
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http

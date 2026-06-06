@@ -3,7 +3,16 @@ replicaCount: 2
 image:
   repository: 758024567313.dkr.ecr.ap-south-1.amazonaws.com/backend-api-dev
   pullPolicy: IfNotPresent
+  # tag is overwritten by CI/CD pipeline on every deploy — never set to "latest"
   tag: e9d80b8e9bb29323c3f0e785ccf04f09469f83d9
+
+# ── Audit metadata ────────────────────────────────────────────────────────────
+audit:
+  environment: prod
+  gitSha:      "unknown"   # overwritten: --set audit.gitSha=$GITHUB_SHA
+  gitRef:      "unknown"   # overwritten: --set audit.gitRef=$GITHUB_REF_NAME
+  deployedBy:  "unknown"   # overwritten: --set audit.deployedBy=$GITHUB_ACTOR
+  deployTime:  "unknown"   # overwritten: --set audit.deployTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 serviceAccount:
   create: true

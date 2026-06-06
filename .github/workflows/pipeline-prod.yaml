@@ -71,14 +71,19 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:prod-latest
 
-      - name: Update image tag in values-prod.yaml
+      - name: Update values-prod.yaml with image tag + audit metadata
         run: |
-          sed -i "s/tag: .*/tag: ${{ github.sha }}/" \
-            backend-services/users-api/backend-api/values-prod.yaml
+          DEPLOY_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          VALUES=backend-services/users-api/backend-api/values-prod.yaml
+          sed -i "s|^  tag:.*|  tag: ${{ github.sha }}|" $VALUES
+          sed -i "s|  gitSha:.*|  gitSha: \"${{ github.sha }}\"|"      $VALUES
+          sed -i "s|  gitRef:.*|  gitRef: \"${{ github.ref_name }}\"|"  $VALUES
+          sed -i "s|  deployedBy:.*|  deployedBy: \"${{ github.actor }}\"|" $VALUES
+          sed -i "s|  deployTime:.*|  deployTime: \"${DEPLOY_TIME}\"|"   $VALUES
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add backend-services/users-api/backend-api/values-prod.yaml
-          git commit -m "chore: update prod image tag to ${{ github.sha }}" || echo "No changes"
+          git add $VALUES
+          git commit -m "chore(prod): deploy ${{ github.sha }} by ${{ github.actor }}" || echo "No changes"
           git push
 
       - name: Update kubeconfig (prod cluster)

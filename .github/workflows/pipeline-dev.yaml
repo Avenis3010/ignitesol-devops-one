@@ -69,14 +69,19 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:dev-latest
 
-      - name: Update image tag in values-dev.yaml
+      - name: Update values-dev.yaml with image tag + audit metadata
         run: |
-          sed -i "s/tag: .*/tag: ${{ github.sha }}/" \
-            backend-services/users-api/backend-api/values-dev.yaml
+          DEPLOY_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          VALUES=backend-services/users-api/backend-api/values-dev.yaml
+          sed -i "s|^  tag:.*|  tag: ${{ github.sha }}|" $VALUES
+          sed -i "s|  gitSha:.*|  gitSha: \"${{ github.sha }}\"|"      $VALUES
+          sed -i "s|  gitRef:.*|  gitRef: \"${{ github.ref_name }}\"|"  $VALUES
+          sed -i "s|  deployedBy:.*|  deployedBy: \"${{ github.actor }}\"|" $VALUES
+          sed -i "s|  deployTime:.*|  deployTime: \"${DEPLOY_TIME}\"|"   $VALUES
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add backend-services/users-api/backend-api/values-dev.yaml
-          git commit -m "chore: update dev image tag to ${{ github.sha }}" || echo "No changes"
+          git add $VALUES
+          git commit -m "chore(dev): deploy ${{ github.sha }} by ${{ github.actor }}" || echo "No changes"
           git push
 
       - name: Update kubeconfig (dev cluster)
