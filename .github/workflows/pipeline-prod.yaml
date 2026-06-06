@@ -38,13 +38,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.backend == 'true'
+    # Requires approval from a reviewer before running — set up at:
+    # GitHub → Settings → Environments → prod-backend → Protection rules
+    environment: prod-backend
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
+          role-to-assume: ${{ vars.BACKEND_PROD_ROLE_ARN }}
           aws-region: ap-south-1
 
       - name: Login to Amazon ECR
@@ -103,6 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.frontend == 'true'
+    environment: prod-frontend
     steps:
       - uses: actions/checkout@v4
 
@@ -122,18 +126,18 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
+          role-to-assume: ${{ vars.FRONTEND_PROD_ROLE_ARN }}
           aws-region: ap-south-1
 
       - name: Deploy to S3 /prod path
         run: |
           aws s3 sync frontend-services/frontend-apps/web-ui/build/ \
-            s3://${{ secrets.S3_BUCKET_NAME }}/prod/ --delete
+            s3://${{ vars.S3_BUCKET_NAME }}/prod/ --delete
 
       - name: Invalidate CloudFront /prod/*
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
             --paths "/prod/*"
 
   # ─── DATABASE ───────────────────────────────────────────────────────────────
@@ -142,13 +146,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.database == 'true'
+    environment: prod-database
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
+          role-to-assume: ${{ vars.DATABASE_PROD_ROLE_ARN }}
           aws-region: ap-south-1
 
       - name: Update kubeconfig

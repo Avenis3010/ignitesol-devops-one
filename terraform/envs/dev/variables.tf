@@ -9,7 +9,7 @@ variable "vpc_cidr" {
 }
 
 variable "aws_region" {
-  type    = string
+  type = string
 }
 
 variable "db_password" {
@@ -20,4 +20,10 @@ variable "db_password" {
 variable "origin_domain" {
   type        = string
   description = "S3 bucket or ALB origin domain for CloudFront"
+}
+
+variable "github_repo" {
+  type        = string
+  description = "GitHub owner/repo, e.g. Avenis3010/ignite-solutions"
+  default     = "Avenis3010/ignite-solutions"
 }

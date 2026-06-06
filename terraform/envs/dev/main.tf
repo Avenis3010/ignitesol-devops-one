@@ -56,3 +56,21 @@ module "cloudfront" {
   s3_bucket_domain = module.s3.bucket_domain_name
   origin_domain    = var.origin_domain
 }
+
+module "iam" {
+  source       = "../../modules/iam"
+  project_name = var.project_name
+  github_repo  = var.github_repo
+
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  oidc_provider_url = module.eks.oidc_provider_url
+
+  ecr_repo_arns               = [module.ecr.backend_repo_arn, module.ecr.frontend_repo_arn]
+  s3_bucket_arn               = module.s3.bucket_arn
+  cloudfront_distribution_arn = module.cloudfront.distribution_arn
+  eks_cluster_arn             = "arn:aws:eks:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/demo-eks"
+  secrets_manager_dev_arn     = module.secrets_dev.secret_arn
+  secrets_manager_prod_arn    = module.secrets_prod.secret_arn
+}
+
+data "aws_caller_identity" "current" {}
