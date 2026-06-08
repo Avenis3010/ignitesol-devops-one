@@ -40,6 +40,13 @@ module "ecr" {
   tags         = local.tags
 }
 
+module "kms" {
+  source       = "../../modules/kms"
+  env          = local.env
+  project_name = local.project_name
+  tags         = local.tags
+}
+
 module "rds" {
   source              = "../../modules/rds"
   env                 = local.env
@@ -48,6 +55,7 @@ module "rds" {
   db_password         = var.db_password
   vpc_id              = module.vpc.vpc_id
   allowed_cidr_blocks = [var.vpc_cidr]
+  kms_key_arn         = module.kms.key_arn
   tags                = local.tags
 }
 
@@ -74,6 +82,7 @@ module "secrets" {
   env         = local.env
   db_host     = module.rds.db_endpoint
   db_password = var.db_password
+  kms_key_arn = module.kms.key_arn
 }
 
 # ── IAM — IRSA roles ──────────────────────────────────────────────────────────

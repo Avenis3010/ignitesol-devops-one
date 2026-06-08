@@ -1,6 +1,7 @@
 resource "aws_secretsmanager_secret" "rds" {
   name                    = "platform/${var.env}/rds"
   recovery_window_in_days = 0
+  kms_key_id              = var.kms_key_arn   # CWE-311: encrypt with CMK
 }
 
 resource "aws_secretsmanager_secret_version" "rds" {

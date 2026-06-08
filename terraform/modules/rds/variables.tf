@@ -5,3 +5,4 @@ variable "project_name"         { type = string }
 variable "db_password"          { sensitive = true }
 variable "allowed_cidr_blocks"  { type = list(string); default = [] }
 variable "tags"                 { type = map(string) }
+variable "kms_key_arn"          { type = string; description = "KMS key ARN for RDS storage encryption" }
