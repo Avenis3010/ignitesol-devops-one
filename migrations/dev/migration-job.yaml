@@ -6,9 +6,21 @@ metadata:
 spec:
   template:
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser:    999   # mysql image default non-root user
+        runAsGroup:   999
+        fsGroup:      999
       containers:
       - name: migration
         image: mysql:8
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem:   false  # mysql client writes temp files
+          runAsNonRoot:             true
+          runAsUser:                999
+          capabilities:
+            drop: ["ALL"]
         resources:
           requests:
             cpu:    "50m"

@@ -71,10 +71,22 @@ resources:
     cpu:    "500m"    # burst up to 0.5 vCPU
     memory: "512Mi"   # hard cap — OOMKill before it impacts other pods
 
-podAnnotations: {}
-podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+# ── Pod-level security context ─────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser:    1000
+  runAsGroup:   1000
+  fsGroup:      1000
+
+# ── Container-level security context ──────────────────────────────────
+securityContext:
+  runAsNonRoot:             true
+  runAsUser:                1000
+  runAsGroup:               1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem:   true
+  capabilities:
+    drop: ["ALL"]
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""

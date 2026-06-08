@@ -49,16 +49,27 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "backend-api.serviceAccountName" . }}
-      {{- with .Values.podSecurityContext }}
+      # ── Pod-level security context ─────────────────────────────────────────
       securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        runAsNonRoot: true                 # pod must not run as root
+        runAsUser:  {{ .Values.podSecurityContext.runAsUser }}
+        runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+        fsGroup:    {{ .Values.podSecurityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault              # use container runtime's default seccomp
       containers:
         - name: {{ .Chart.Name }}
-          {{- with .Values.securityContext }}
+          # ── Container-level security context ────────────────────────────────
           securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            allowPrivilegeEscalation: false  # cannot gain more privileges than parent
+            readOnlyRootFilesystem:   true   # filesystem is immutable
+            runAsNonRoot:             true
+            runAsUser:  {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            capabilities:
+              drop:
+                - ALL                        # drop every Linux capability
+              add: []                        # add back none — gunicorn needs none
           # Never use :latest — tag is always the exact git SHA set by CI/CD
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -98,10 +109,13 @@ spec:
           readinessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            requests:
+              cpu:    {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
           {{- with .Values.volumeMounts }}
           volumeMounts:
             {{- toYaml . | nindent 12 }}

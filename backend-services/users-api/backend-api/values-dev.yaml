@@ -73,10 +73,22 @@ resources:
     cpu:    "300m"    # burst up to 0.3 vCPU
     memory: "256Mi"   # hard cap — prevents noisy-neighbour memory exhaustion
 
-podAnnotations: {}
-podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+# ── Pod-level security context ─────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser:    1000   # non-root UID
+  runAsGroup:   1000
+  fsGroup:      1000   # files created in mounted volumes owned by this GID
+
+# ── Container-level security context ──────────────────────────────────
+securityContext:
+  runAsNonRoot:             true
+  runAsUser:                1000
+  runAsGroup:               1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem:   true
+  capabilities:
+    drop: ["ALL"]
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
