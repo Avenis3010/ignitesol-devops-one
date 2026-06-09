@@ -3,8 +3,15 @@ kind: Application
 metadata:
   name: backend-api-prod
   namespace: argocd
+  labels:
+    environment: prod
+    project: central-platform
+  annotations:
+    # Prod deployments require a PR merged to production branch,
+    # passing all required status checks, and a manual approval in GitHub.
+    deploy/policy: "pr-review-required"
 spec:
-  project: default
+  project: prod
   source:
     repoURL: https://github.com/Avenis3010/ignite-solutions.git
     targetRevision: production
@@ -16,8 +23,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: prod
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # automated sync is OFF for prod — pipeline triggers sync explicitly
+    # after GitHub environment approval gate passes
     syncOptions:
-      - CreateNamespace=true
+      - CreateNamespace=false
+      - PrunePropagationPolicy=foreground
+      - ApplyOutOfSyncOnly=true

@@ -3,7 +3,19 @@ replicaCount: 1
 image:
   repository: 758024567313.dkr.ecr.ap-south-1.amazonaws.com/backend-api-dev
   pullPolicy: IfNotPresent
+  # tag is overwritten by CI/CD pipeline on every deploy — never set to "latest"
   tag: 078b225d7ef4d9794c3a1770e1556de0e1451ff3
+
+# ── Audit metadata ────────────────────────────────────────────────────────────
+# These defaults are placeholders. CI/CD overwrites every field via --set at
+# deploy time so that "kubectl describe deployment/backend-api-dev" shows the
+# exact version, who deployed it, when, and from which branch.
+audit:
+  environment: dev
+  gitSha:      "unknown"   # overwritten: --set audit.gitSha=$GITHUB_SHA
+  gitRef:      "unknown"   # overwritten: --set audit.gitRef=$GITHUB_REF_NAME
+  deployedBy:  "unknown"   # overwritten: --set audit.deployedBy=$GITHUB_ACTOR
+  deployTime:  "unknown"   # overwritten: --set audit.deployTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 serviceAccount:
   create: true
@@ -50,11 +62,33 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
 
-resources: {}
-podAnnotations: {}
-podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+# ── Resource limits ───────────────────────────────────────────────────────────
+# requests: guaranteed allocation — used for scheduling decisions
+# limits:   hard cap — container is OOMKilled if memory limit is exceeded
+resources:
+  requests:
+    cpu:    "100m"    # 0.1 vCPU guaranteed
+    memory: "128Mi"
+  limits:
+    cpu:    "300m"    # burst up to 0.3 vCPU
+    memory: "256Mi"   # hard cap — prevents noisy-neighbour memory exhaustion
+
+# ── Pod-level security context ─────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser:    1000   # non-root UID
+  runAsGroup:   1000
+  fsGroup:      1000   # files created in mounted volumes owned by this GID
+
+# ── Container-level security context ──────────────────────────────────
+securityContext:
+  runAsNonRoot:             true
+  runAsUser:                1000
+  runAsGroup:               1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem:   true
+  capabilities:
+    drop: ["ALL"]
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""

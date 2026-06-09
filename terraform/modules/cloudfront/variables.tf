@@ -1,5 +1,5 @@
 variable "s3_bucket_domain" {}
-variable "origin_domain" {
-  type        = string
-  description = "S3 bucket or ALB origin domain for CloudFront"
-}
+variable "origin_domain"    { type = string }
+variable "env"              { type = string }
+variable "project_name"     { type = string }
+variable "tags"             { type = map(string) }

@@ -3,7 +3,16 @@ replicaCount: 2
 image:
   repository: 758024567313.dkr.ecr.ap-south-1.amazonaws.com/backend-api-dev
   pullPolicy: IfNotPresent
-  tag: 8ed28ce60248c85ba0a81af344abdf67ffc4076d
+  # tag is overwritten by CI/CD pipeline on every deploy — never set to "latest"
+  tag: e9d80b8e9bb29323c3f0e785ccf04f09469f83d9
+
+# ── Audit metadata ────────────────────────────────────────────────────────────
+audit:
+  environment: prod
+  gitSha:      "unknown"   # overwritten: --set audit.gitSha=$GITHUB_SHA
+  gitRef:      "unknown"   # overwritten: --set audit.gitRef=$GITHUB_REF_NAME
+  deployedBy:  "unknown"   # overwritten: --set audit.deployedBy=$GITHUB_ACTOR
+  deployTime:  "unknown"   # overwritten: --set audit.deployTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 serviceAccount:
   create: true
@@ -45,16 +54,39 @@ readinessProbe:
   periodSeconds: 5
 
 autoscaling:
-  enabled: false
+  enabled: true
   minReplicas: 2
   maxReplicas: 5
-  targetCPUUtilizationPercentage: 80
+  targetCPUUtilizationPercentage: 70   # scale earlier than dev to absorb traffic spikes
 
-resources: {}
-podAnnotations: {}
-podLabels: {}
-podSecurityContext: {}
-securityContext: {}
+# ── Resource limits ───────────────────────────────────────────────────────────
+# Prod gets more headroom than dev to handle real traffic.
+# requests: guaranteed allocation — used for scheduling and HPA calculations
+# limits:   hard cap — prevents a single pod starving the node
+resources:
+  requests:
+    cpu:    "200m"    # 0.2 vCPU guaranteed per replica
+    memory: "256Mi"
+  limits:
+    cpu:    "500m"    # burst up to 0.5 vCPU
+    memory: "512Mi"   # hard cap — OOMKill before it impacts other pods
+
+# ── Pod-level security context ─────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser:    1000
+  runAsGroup:   1000
+  fsGroup:      1000
+
+# ── Container-level security context ──────────────────────────────────
+securityContext:
+  runAsNonRoot:             true
+  runAsUser:                1000
+  runAsGroup:               1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem:   true
+  capabilities:
+    drop: ["ALL"]
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
