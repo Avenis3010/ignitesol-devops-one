@@ -4,11 +4,20 @@ import os
 app = Flask(__name__)
 
 ENV = os.getenv("APP_ENV", "dev")
+GIT_SHA = os.getenv("GIT_SHA", "unknown")
+DEPLOYED_BY = os.getenv("DEPLOYED_BY", "unknown")
+DEPLOY_TIME = os.getenv("DEPLOY_TIME", "unknown")
 
 @app.route(f"/{ENV}/")
 @app.route(f"/{ENV}")
 def home():
-    return f"Backend API Running - Environment: {ENV} - v3.0"
+    return {
+        "status": "Backend API Running",
+        "environment": ENV,
+        "version": GIT_SHA,
+        "deployed_by": DEPLOYED_BY,
+        "deployed_at": DEPLOY_TIME
+    }
 
 @app.route(f"/{ENV}/health")
 def health():

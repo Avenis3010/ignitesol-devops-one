@@ -5,9 +5,19 @@ on:
     branches:
       - dev
 
+# Only one deploy runs at a time on dev. A new push cancels an in-progress run.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
 permissions:
   id-token: write
   contents: write
+  security-events: write   # upload Trivy SARIF to GitHub Security tab
+
+env:
+  AWS_REGION:   ap-south-1
+  EKS_CLUSTER:  central-platform-dev-eks    # dev-only cluster
 
 jobs:
 
@@ -16,7 +26,7 @@ jobs:
     name: Detect Changed Paths
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+      backend:  ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       database: ${{ steps.filter.outputs.database }}
     steps:
@@ -38,47 +48,83 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.backend == 'true'
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
-          aws-region: ap-south-1
+          role-to-assume: ${{ vars.BACKEND_DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build & push backend image
+      - name: Build backend image (local — before scan)
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: backend-api-dev
-          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_BACKEND_REPO_DEV }}
+          IMAGE_TAG:      ${{ github.sha }}
         run: |
           cd backend-services/users-api
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-                      $ECR_REGISTRY/$ECR_REPOSITORY:dev-latest
+
+      # ── Trivy image scan — CRITICAL blocks deploy ─────────────────────────
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_BACKEND_REPO_DEV }}:${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL
+          exit-code: "1"          # fail and block push on CRITICAL CVEs
+
+      - name: Upload Trivy image results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+
+      - name: Push backend image to ECR
+        env:
+          ECR_REGISTRY:   ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_BACKEND_REPO_DEV }}
+          IMAGE_TAG:      ${{ github.sha }}
+        run: |
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                     $ECR_REGISTRY/$ECR_REPOSITORY:dev-latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:dev-latest
 
-      - name: Update image tag in values-dev.yaml
+      - name: Update values-dev.yaml with image tag + audit metadata
         run: |
-          sed -i "s/tag: .*/tag: ${{ github.sha }}/" \
-            backend-services/users-api/backend-api/values-dev.yaml
+          DEPLOY_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          VALUES=backend-services/users-api/backend-api/values-dev.yaml
+          sed -i "s|^  tag:.*|  tag: ${{ github.sha }}|" $VALUES
+          sed -i "s|  gitSha:.*|  gitSha: \"${{ github.sha }}\"|"      $VALUES
+          sed -i "s|  gitRef:.*|  gitRef: \"${{ github.ref_name }}\"|"  $VALUES
+          sed -i "s|  deployedBy:.*|  deployedBy: \"${{ github.actor }}\"|" $VALUES
+          sed -i "s|  deployTime:.*|  deployTime: \"${DEPLOY_TIME}\"|"   $VALUES
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add backend-services/users-api/backend-api/values-dev.yaml
-          git commit -m "chore: update dev image tag to ${{ github.sha }}" || echo "No changes"
+          git add $VALUES
+          git commit -m "chore(dev): deploy ${{ github.sha }} by ${{ github.actor }}" || echo "No changes"
           git push
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name demo-eks --region ap-south-1
+      - name: Update kubeconfig (dev cluster)
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
 
-      - name: Apply ArgoCD dev app
-        run: kubectl apply -f argocd/backend-dev.yaml
+      - name: Apply namespace + network policy
+        run: |
+          kubectl apply -f k8s/dev/namespace.yaml
+          kubectl apply -f k8s/dev/network-policy.yaml
+
+      - name: Apply ArgoCD project + app
+        run: |
+          kubectl apply -f argocd/project-dev.yaml
+          kubectl apply -f argocd/backend-dev.yaml
 
       - name: Install ArgoCD CLI
         run: |
@@ -103,6 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.frontend == 'true'
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
@@ -122,19 +169,19 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
-          aws-region: ap-south-1
+          role-to-assume: ${{ vars.FRONTEND_DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to S3 /dev path
+      - name: Deploy to S3 (dev bucket)
         run: |
           aws s3 sync frontend-services/frontend-apps/web-ui/build/ \
-            s3://${{ secrets.S3_BUCKET_NAME }}/dev/ --delete
+            s3://${{ vars.S3_BUCKET_NAME_DEV }}/ --delete
 
-      - name: Invalidate CloudFront /dev/*
+      - name: Invalidate CloudFront (dev distribution)
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/dev/*"
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID_DEV }} \
+            --paths "/*"
 
   # ─── DATABASE ───────────────────────────────────────────────────────────────
   database-migration:
@@ -142,31 +189,29 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.database == 'true'
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
-          aws-region: ap-south-1
+          role-to-assume: ${{ vars.DATABASE_DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name demo-eks --region ap-south-1
+      - name: Update kubeconfig (dev cluster)
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
 
-      - name: Apply secret and configmap
+      - name: Bootstrap namespace + ESO
         run: |
-          kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create secret generic rds-secret -n dev \
-            --from-literal=DB_HOST=${{ secrets.DEV_DB_HOST }} \
-            --from-literal=DB_NAME=${{ secrets.DEV_DB_NAME }} \
-            --from-literal=DB_USER=${{ secrets.DEV_DB_USER }} \
-            --from-literal=DB_PASSWORD=${{ secrets.DEV_DB_PASSWORD }} \
-            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/dev/namespace.yaml
+          kubectl apply -f k8s/dev/network-policy.yaml
+          kubectl apply -f external-secrets/service-accounts.yaml
+          kubectl apply -f external-secrets/secret-store-dev.yaml
+
+      - name: Apply configmap & run migration
+        run: |
           kubectl apply -f migrations/dev/configmap.yaml
-
-      - name: Run migration
-        run: |
           kubectl delete job mysql-migration -n dev --ignore-not-found=true
           kubectl apply -f migrations/dev/migration-job.yaml
           kubectl wait --for=condition=complete job/mysql-migration -n dev --timeout=300s

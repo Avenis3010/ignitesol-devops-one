@@ -1,7 +1,10 @@
-variable "project_name" {
-  type = string
-}
-
-variable "github_repo" {
-  type = string
-}
+variable "project_name"               { type = string }
+variable "github_repo"                { type = string }
+variable "env"                        { type = string }
+variable "oidc_provider_arn"          { type = string }
+variable "oidc_provider_url"          { type = string }
+variable "ecr_repo_arns"              { type = list(string) }
+variable "s3_bucket_arn"              { type = string }
+variable "cloudfront_distribution_arn" { type = string }
+variable "eks_cluster_arn"            { type = string }
+variable "secrets_manager_secret_arn" { type = string }

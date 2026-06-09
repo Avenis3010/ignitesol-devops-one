@@ -1,0 +1,67 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: prod
+  namespace: argocd
+  labels:
+    environment: prod
+    project: central-platform
+spec:
+  description: "Prod environment — isolated from dev. Manual sync only inside maintenance window."
+
+  sourceRepos:
+    - https://github.com/Avenis3010/ignite-solutions.git
+
+  destinations:
+    - namespace: prod
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  clusterResourceBlacklist:
+    - group: ""
+      kind: Node
+    - group: ""
+      kind: PersistentVolume
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRole
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRoleBinding
+
+  orphanedResources:
+    warn: true
+
+  # Prod sync is only allowed Mon–Fri 09:00–17:00 IST (UTC+5:30 = 03:30–11:30 UTC)
+  # Outside this window ArgoCD will NOT auto-sync — a human must override.
+  syncWindows:
+    - kind: allow
+      schedule: "30 3 * * 1-5"   # Mon–Fri 09:00 IST
+      duration: 8h
+      applications:
+        - "*"
+      namespaces:
+        - prod
+      manualSync: true            # humans can still force-sync outside window
+    - kind: deny
+      schedule: "0 0 * * 6-7"    # weekends — full deny, no manual override
+      duration: 48h
+      applications:
+        - "*"
+      namespaces:
+        - prod
+      manualSync: false
+
+  roles:
+    - name: prod-deployer
+      description: "GitHub Actions CI/CD — production branch only"
+      policies:
+        - p, proj:prod:prod-deployer, applications, sync,   prod/*, allow
+        - p, proj:prod:prod-deployer, applications, get,    prod/*, allow
+        - p, proj:prod:prod-deployer, applications, create, prod/*, deny
+        - p, proj:prod:prod-deployer, applications, delete, prod/*, deny

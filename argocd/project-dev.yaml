@@ -1,0 +1,57 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: dev
+  namespace: argocd
+  labels:
+    environment: dev
+    project: central-platform
+spec:
+  description: "Dev environment — isolated from prod. Only deploys to dev namespace."
+
+  # Only this repo may be a source
+  sourceRepos:
+    - https://github.com/Avenis3010/ignite-solutions.git
+
+  # Only the dev namespace on the local cluster is a valid destination
+  destinations:
+    - namespace: dev
+      server: https://kubernetes.default.svc
+
+  # Permit Terraform/ArgoCD to manage the namespace resource itself
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  # All namespaced resources allowed in dev
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Deny dangerous cluster-wide resources from being managed via ArgoCD in dev
+  clusterResourceBlacklist:
+    - group: ""
+      kind: Node
+    - group: ""
+      kind: PersistentVolume
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRole
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRoleBinding
+
+  # Alert in ArgoCD UI when resources exist in dev namespace but are not
+  # tracked by any Application (catches manual kubectl applies)
+  orphanedResources:
+    warn: true
+
+  # Dev deploys are allowed at any time — no sync window restriction
+  # syncWindows: []
+
+  roles:
+    - name: dev-deployer
+      description: "GitHub Actions CI/CD — dev branch only"
+      policies:
+        - p, proj:dev:dev-deployer, applications, sync,   dev/*, allow
+        - p, proj:dev:dev-deployer, applications, get,    dev/*, allow
+        - p, proj:dev:dev-deployer, applications, create, dev/*, deny
+        - p, proj:dev:dev-deployer, applications, delete, dev/*, deny

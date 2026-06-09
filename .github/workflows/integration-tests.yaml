@@ -24,11 +24,11 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::758024567313:role/github-oidc-role
+        role-to-assume: ${{ vars.DATABASE_DEV_ROLE_ARN }}
         aws-region: ap-south-1
 
     - name: Update kubeconfig
-      run: aws eks update-kubeconfig --name demo-eks --region ap-south-1
+      run: aws eks update-kubeconfig --name central-platform-dev-eks --region ap-south-1
 
     - name: Check Backend API Health
       run: |
