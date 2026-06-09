@@ -24,7 +24,7 @@ The new process works as follows:
 4. Remove hardcoded secret creation from dev and prod pipeline; ESO syncs it from Secrets Manager.
 5. Apply ESO service account and SecretStore before running migration in dev and prod pipeline.
 
-## Improvements:
+## Improvements Made:
 1. At no point does the CI/CD pipeline directly handle database passwords or other sensitive values.
 2. Now After that, the pipelines and ArgoCD handle everything automatically — no credentials ever touch Git or GitHub Secrets.
     
@@ -42,7 +42,7 @@ They can:  Delete production resources , Modify infrastructure ,Access secrets ,
 3. Gives resource specific permissions for not to Access every repository.
 #### File reference: ignitesol-devops-one\terraform\modules\iam\main.tf
 
-## Improvements:
+## Improvements Made:
 1. Security reviews become easier because permissions are scoped to business    functions.
 2. Access boundaries are clearly defined .
 3. Test pipelines cannot accidentally destroy infrastructure.
@@ -58,11 +58,11 @@ Initially had the shared resources for dev and prod env.
 3. Separate Terraform State: To prevent State Corruption, where a change in one environment accidentally modifies resources in another. we separated the Terraform State files. Each environment has its own terraform.tfstate key in the S3 backend. This allows to run terraform apply on Dev with zero risk of touching Production state.
 4. Keyless CI/CD Roles (OIDC & Least Privilege): moved away from static AWS Access Keys to GitHub OIDC Federation. 
 5. created scoped IAM roles like backend-dev-role and backend-prod-role. These roles use Trust Policies that are branch-locked: the Prod role can only be assumed by a workflow running on the production branch.
-File Reference: terraform/modules/iam/main.tf
 6. Production Protection (Manual Approval): Integrated GitHub Environments into the CI/CD pipelines.In the pipeline-prod.yaml, every deployment job is tied to a specific GitHub Environment (e.g., prod-backend). This environment is configured with Required Reviewers, so even if code is merged to the production branch, the actual deployment to AWS is paused until a senior engineer manually approves it in the GitHub UI.
 7. Deployment Target Isolation:  To prevent 'Accidental Deployment' (deploying dev code to prod), we isolated the deployment targets in our GitHub Actions. The Dev pipeline is hard-coded to only talk to the central-platform-dev-eks cluster, while the Prod pipeline only targets central-platform-prod-eks.
 8. ArgoCD AppProject Separation: The prod AppProject is restricted to only deploy to the prod namespace. It also includes a clusterResourceBlacklist for dangerous resources like Nodes or ClusterRoles. This ensures that even if someone accidentally changes a destination in a Helm chart, ArgoCD will block the sync because it violates the project's security policy.
 9. Network Policy (Zero-Trust Networking): Applied Kubernetes NetworkPolicy to prevent cross-namespace communication.Applied a policy that uses namespaceSelector to block all traffic between the dev and prod namespaces. if a developer's pod in the dev namespace is compromised, the attacker cannot reach any services running in the production namespace.
+#### File Reference: terraform/modules/iam/main.tf
 #### File reference: ignitesol-devops-one\.github\workflows\pipeline-dev.yaml, ignitesol-devops-one\.github\workflows\pipeline-prod.yaml, argocd/project-prod.yaml, 
 #### File reference: ignitesol-devops-one\.github\workflows\pipeline-dev.yaml, ignitesol-devops-one\.github\workflows\pipeline-prod.yaml, argocd/project-prod.yaml, 
 #### File Reference: k8s/dev/network-policy.yaml, k8s/prod/network-policy.yaml
@@ -123,7 +123,7 @@ Initially, all applications were deployed using the default ArgoCD project, whic
 6. Added concurrency groups to the main pipelines to ensure that only one deployment runs at a time per environment. This prevents multiple deployments from interfering with each other and avoids deployment conflicts.
 #### File reference: argocd/project-prod.yaml, .github/workflows/ci-checks.yamL
 
-## Improvements:
+## Improvements Made:
 1. Blast Radius Control: Even if a developer accidentally points a dev Helm chart to the production namespace, ArgoCD will reject the sync because it violates the AppProject security policy.
 2. Drift Detection:ArgoCD now alerts if any resource exists in the dev or prod namespaces that isn't explicitly defined in Git, catching manual "hotfixes.
 3. Branch protection ensures that no code reaches production without human approval.
@@ -164,7 +164,7 @@ Initially, the containers did not have CPU or memory limits configured. This mea
 4. Enabled Horizontal Pod Autoscaling in Production. It automatically increases or decreases the number of pods based on CPU usage, with a target of 70%.
 #### File reference: backend-services/users-api/backend-api/values-prod.yaml, backend-services/users-api/backend-api/templates/deployment.yaml
 
-## Improvements:
+## Improvements Made:
 1.Kubernetes now places pods more intelligently because it uses resource requests. This ensures pods are only scheduled on nodes that have enough available CPU and memory.
 2. By setting limits, we ensure that a pod exceeding its memory allocation is OOMKilled by the kernel before it can crash the entire EC2 node.
 3. HPA now scales applications more accurately because it uses resource requests as a baseline to measure CPU usage and decide when to add more pods.
@@ -185,7 +185,7 @@ Initially, containers were running with default permissions, which often include
 5. Configured the `RuntimeDefault` seccomp profile. This instructs the container runtime (containerd/Docker) to use its default syscall filter, blocking hundreds of dangerous system calls that are not required for standard web applications.
 #### File reference: backend-services/users-api/backend-api/templates/deployment.yaml, backend-services/users-api/backend-api/values.yaml
 
-## Improvements:
+## Improvements Made:
 1. By combining non-root users with read-only filesystems and dropped capabilities, we create multiple layers of security that an attacker must bypass.
 2. The read-only root filesystem guarantees that the container remains in the exact state it was built in, simplifying forensics and preventing persistence after a compromise.
 3. These settings align with the Kubernetes "Restricted" Pod Security Standard, which is a requirement for many security frameworks like SOC2 and PCI-DSS.
